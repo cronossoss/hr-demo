@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+
 class WorkEntry extends Model
 {
     protected $table = 'work_entries';
@@ -22,4 +23,9 @@ class WorkEntry extends Model
     {
         return $this->belongsTo(Employee::class);
     }
+
+    public function type()
+{
+    return $this->belongsTo(\App\Models\WorkEntryType::class, 'work_entry_type_id');
+}
 }
