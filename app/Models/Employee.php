@@ -1,5 +1,5 @@
 <?php
-// app/Models/Employee.php -->
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
@@ -23,10 +23,15 @@ class Employee extends Model
         'gender'
     ];
 
+    // 👉 organizaciona jedinica
     public function organizationalUnit()
     {
         return $this->belongsTo(\App\Models\OrganizationalUnit::class);
     }
 
-    
+    // 👉 RADNI UNOSI (OVO JE FALILO)
+    public function entries()
+    {
+        return $this->hasMany(\App\Models\WorkEntry::class, 'employee_id');
+    }
 }

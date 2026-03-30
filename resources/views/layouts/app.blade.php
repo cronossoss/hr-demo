@@ -5,6 +5,7 @@
 
     <!-- @vite(['resources/js/app.js']) -->
      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+     @vite(['resources/css/app.css', 'resources/js/app.js'])
      
      
     <script>

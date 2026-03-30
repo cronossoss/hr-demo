@@ -4,37 +4,68 @@ namespace App\Http\Controllers;
 
 use App\Models\WorkEntry;
 use App\Models\WorkEntryType;
+use Illuminate\Http\Request;
+use Carbon\Carbon;
 
 class WorkController extends Controller
 {
     // =====================================================
-    // WORK PREGLED
+    // 📅 PREGLED RADA ZA JEDNOG ZAPOSLENOG
     // =====================================================
     public function index($id)
     {
-        $query = \App\Models\WorkEntry::with('type')
-            ->where('employee_id', $id);
+        // -------------------------------------------------
+        // 📌 1. PERIOD (mesec/godina)
+        // -------------------------------------------------
+        \Carbon\Carbon::setLocale('sr');
+        $month = request('month') ?? now()->month;
+        $year = request('year') ?? now()->year;
+        $holidays = [
+            "$year-01-01",
+            "$year-01-02",
+            "$year-02-15",
+            "$year-02-16",
+            "$year-04-10",
+            "$year-04-13",
+            "$year-05-01",
+            "$year-05-02",
+            "$year-11-11"
+        ];
 
-        if (request('year') && request('month')) {
-            $query->whereYear('date', request('year'))
-                ->whereMonth('date', request('month'));
-        }
+        $daysInMonth = Carbon::create($year, $month)->daysInMonth;
+
+        // -------------------------------------------------
+        // 📌 2. OSNOVNI QUERY
+        // -------------------------------------------------
+        $query = WorkEntry::with('type')
+            ->where('employee_id', $id)
+            ->whereYear('date', $year)
+            ->whereMonth('date', $month);
 
         $entries = $query->orderBy('date', 'asc')->get();
+        $employee = \App\Models\Employee::findOrFail($id);
+
+        // -------------------------------------------------
+        // 📌 3. TIPOVI (za formu)
+        // -------------------------------------------------
         $types = WorkEntryType::orderBy('code')->get();
 
-        // =========================
-        // RAZDVAJANJE
-        // =========================
+        // -------------------------------------------------
+        // 📌 4. RAZDVAJANJE (time vs range)
+        // -------------------------------------------------
+        $timeEntries = $entries->filter(
+            fn($e) =>
+            $e->type && $e->type->input_type === 'time'
+        );
 
-        $timeEntries = $entries->filter(function ($e) {
-            return $e->type && $e->type->input_type === 'time';
-        });
+        $rangeEntries = $entries->filter(
+            fn($e) =>
+            $e->type && $e->type->input_type === 'range'
+        );
 
-        $rangeEntries = $entries->filter(function ($e) {
-            return $e->type && $e->type->input_type === 'range';
-        });
-
+        // -------------------------------------------------
+        // 📌 5. STATISTIKA (minute)
+        // -------------------------------------------------
         $regularMinutes = 0;
         $extraMinutes = 0;
         $unpaidMinutes = 0;
@@ -43,11 +74,10 @@ class WorkController extends Controller
 
             if (!$e->time_from || !$e->time_to) continue;
 
-            $from = \Carbon\Carbon::parse($e->time_from);
-            $to = \Carbon\Carbon::parse($e->time_to);
+            $from = Carbon::parse($e->time_from);
+            $to = Carbon::parse($e->time_to);
 
             $minutes = max(0, $from->diffInMinutes($to));
-
             $multiplier = $e->type->pay_multiplier ?? 1;
 
             if ($multiplier == 1) {
@@ -59,112 +89,171 @@ class WorkController extends Controller
             }
         }
 
+        // -------------------------------------------------
+        // 📌 6. GRID (po danima za UI)
+        // -------------------------------------------------
+        $entriesByDay = $entries->map(function ($e) {
+            $e->day = Carbon::parse($e->date)->day;
+            return $e;
+        });
+
+        $employees = \App\Models\Employee::with(['entries' => function ($q) use ($month, $year) {
+            $q->with('type')
+                ->whereYear('date', $year)
+                ->whereMonth('date', $month);
+        }])->get()->map(function ($emp) {
+
+            $emp->entries = $emp->entries->map(function ($e) {
+                $e->day = \Carbon\Carbon::parse($e->date)->day;
+                return $e;
+            });
+
+            return $emp;
+        });
+
+        // -------------------------------------------------
+        // 📌 7. RETURN VIEW
+        // -------------------------------------------------
         return view('work.index', compact(
             'timeEntries',
             'rangeEntries',
             'types',
             'regularMinutes',
             'extraMinutes',
-            'unpaidMinutes'
+            'unpaidMinutes',
+            'entriesByDay',
+            'daysInMonth',
+            'month',
+            'year',
+            'employee',
+            'employees',
+            'holidays'
         ));
     }
 
     // =====================================================
-    // STORE WORK ENTRY
+    // 💾 STORE WORK ENTRY (unos rada)
     // =====================================================
-    public function store(\Illuminate\Http\Request $request)
-{
-    // =========================
-    // OSNOVNA VALIDACIJA
-    // =========================
-    $request->validate([
-        'employee_id' => 'required|exists:employees,id',
-        'work_entry_type_id' => 'required|exists:work_entry_types,id',
-    ]);
-
-    $type = \App\Models\WorkEntryType::find($request->work_entry_type_id);
-
-    // =========================
-    // RANGE (godišnji, bolovanje...)
-    // =========================
-    if ($type->input_type === 'range') {
-
+    public function store(Request $request)
+    {
+        // -------------------------------------------------
+        // 📌 1. OSNOVNA VALIDACIJA
+        // -------------------------------------------------
         $request->validate([
-            'date_from' => 'required',
-            'date_to' => 'required',
+            'employee_id' => 'required|exists:employees,id',
+            'work_entry_type_id' => 'required|exists:work_entry_types,id',
         ]);
 
-        // zabrana vremena
-        if ($request->time_from || $request->time_to) {
-            return back()->withErrors([
-                'error' => 'Za ovu vrstu unosa ne unosi se vreme.'
+        $type = WorkEntryType::findOrFail($request->work_entry_type_id);
+
+        // -------------------------------------------------
+        // 📌 2. RANGE UNOS (godišnji, bolovanje...)
+        // -------------------------------------------------
+        if ($type->input_type === 'range') {
+
+            $request->validate([
+                'date_from' => 'required',
+                'date_to' => 'required',
             ]);
+
+            $from = Carbon::createFromFormat('d.m.Y', $request->date_from);
+            $to = Carbon::createFromFormat('d.m.Y', $request->date_to);
+
+            while ($from <= $to) {
+
+                // 👉 spreči duplikate
+                $exists = WorkEntry::where('employee_id', $request->employee_id)
+                    ->where('date', $from->format('Y-m-d'))
+                    ->where('work_entry_type_id', $request->work_entry_type_id)
+                    ->exists();
+
+                if (!$exists) {
+                    WorkEntry::create([
+                        'employee_id' => $request->employee_id,
+                        'work_entry_type_id' => $request->work_entry_type_id,
+                        'date' => $from->format('Y-m-d'),
+                        'time_from' => null,
+                        'time_to' => null,
+                        'note' => $request->note,
+                    ]);
+                }
+
+                $from->addDay();
+            }
         }
 
-        $from = \Carbon\Carbon::createFromFormat('d.m.Y', $request->date_from);
-        $to = \Carbon\Carbon::createFromFormat('d.m.Y', $request->date_to);
+        // -------------------------------------------------
+        // 📌 3. TIME UNOS (rad po satima)
+        // -------------------------------------------------
+        else {
 
-        while ($from <= $to) {
+            $request->validate([
+                'date' => 'required',
+                'time_from' => 'required',
+                'time_to' => 'required',
+            ]);
 
-            // duplikat check
-            $exists = \App\Models\WorkEntry::where('employee_id', $request->employee_id)
-                ->where('date', $from->format('Y-m-d'))
+            $date = Carbon::createFromFormat('d.m.Y', $request->date)
+                ->format('Y-m-d');
+
+            // 👉 spreči duplikate
+            $exists = WorkEntry::where('employee_id', $request->employee_id)
+                ->where('date', $date)
                 ->where('work_entry_type_id', $request->work_entry_type_id)
                 ->exists();
 
-            if (!$exists) {
-                \App\Models\WorkEntry::create([
-                    'employee_id' => $request->employee_id,
-                    'work_entry_type_id' => $request->work_entry_type_id,
-                    'date' => $from->format('Y-m-d'),
-                    'time_from' => null,
-                    'time_to' => null,
-                    'note' => $request->note,
+            if ($exists) {
+                return back()->withErrors([
+                    'error' => 'Već postoji unos za ovaj dan.'
                 ]);
             }
 
-            $from->addDay();
-        }
-    }
-
-    // =========================
-    // TIME (rad, pauza...)
-    // =========================
-    else {
-
-        $request->validate([
-            'date' => 'required',
-            'time_from' => 'required',
-            'time_to' => 'required',
-        ]);
-
-        $date = \Carbon\Carbon::createFromFormat('d.m.Y', $request->date)->format('Y-m-d');
-
-        // duplikat check
-        $exists = \App\Models\WorkEntry::where('employee_id', $request->employee_id)
-            ->where('date', $date)
-            ->where('work_entry_type_id', $request->work_entry_type_id)
-            ->exists();
-
-        if ($exists) {
-            return back()->withErrors([
-                'error' => 'Već postoji unos za ovaj dan.'
+            WorkEntry::create([
+                'employee_id' => $request->employee_id,
+                'work_entry_type_id' => $request->work_entry_type_id,
+                'date' => $date,
+                'time_from' => $date . ' ' . $request->time_from,
+                'time_to' => $date . ' ' . $request->time_to,
+                'note' => $request->note,
             ]);
         }
 
-        $timeFrom = $date . ' ' . $request->time_from;
-        $timeTo = $date . ' ' . $request->time_to;
-
-        \App\Models\WorkEntry::create([
-            'employee_id' => $request->employee_id,
-            'work_entry_type_id' => $request->work_entry_type_id,
-            'date' => $date,
-            'time_from' => $timeFrom,
-            'time_to' => $timeTo,
-            'note' => $request->note,
-        ]);
+        return back()->with('success', 'Unos uspešno sačuvan');
     }
 
-    return redirect()->back()->with('success', 'Unos uspešno sačuvan');
-}
+    public function updateOrCreate(Request $request)
+    {
+        try {
+
+            $request->validate([
+                'employee_id' => 'required',
+                'date' => 'required|date',
+                'type_id' => 'required'
+            ]);
+
+            $entry = \App\Models\WorkEntry::where('employee_id', $request->employee_id)
+                ->where('date', $request->date)
+                ->first();
+
+            if ($entry) {
+                $entry->work_entry_type_id = $request->type_id;
+                $entry->save();
+            } else {
+                \App\Models\WorkEntry::create([
+                    'employee_id' => $request->employee_id,
+                    'work_entry_type_id' => $request->type_id,
+                    'date' => $request->date
+                ]);
+            }
+
+            return response()->json([
+                'success' => true
+            ]);
+        } catch (\Exception $e) {
+
+            return response()->json([
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

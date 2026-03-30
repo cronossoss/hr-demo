@@ -2,6 +2,183 @@
 
 @section('content')
 
+<style>
+.active-cell {
+    outline: 2px solid #3b82f6;
+    outline-offset: -2px;
+}
+
+.active-row td {
+    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.3);
+}
+
+.active-row td:first-child {
+    position: relative;
+}
+
+.active-row td:first-child::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: #3b82f6;
+}
+</style>
+
+
+
+<div class="p-6">
+    <h1 class="text-2xl font-bold mb-4">Kalendar rada</h1>
+
+    <!-- FILTERI (kasnije) -->
+    <div class="mb-4">
+        <select id="employeeFilter" class="border p-2 rounded">
+            <option value="">Svi zaposleni</option>
+        </select>
+    </div>
+
+    <!-- KALENDAR -->
+   {{-- <div id="calendar"></div> --}}
+
+    <div class="bg-white shadow rounded-xl p-4 mt-6 overflow-x-auto">
+
+        <div class="flex gap-4 mb-3 text-sm">
+            <div class="flex items-center gap-1">
+                <div class="w-4 h-4 bg-green-500"></div> Rad
+            </div>
+            <div class="flex items-center gap-1">
+                <div class="w-4 h-4 bg-yellow-400"></div> Odsustvo
+            </div>
+            <div class="flex items-center gap-1">
+                <div class="w-4 h-4 bg-red-500"></div> Problem
+            </div>
+            <div class="flex items-center gap-1">
+                <div class="w-4 h-4 bg-gray-200"></div> Vikend
+            </div>
+            <div class="flex items-center gap-1">
+                <div class="w-4 h-4 bg-blue-200"></div> Praznik
+            </div>
+        </div>
+
+        <div class="flex gap-2 mb-4 items-center">
+
+            <!-- MESEC -->
+            <select id="gridMonth" class="border p-1 rounded">
+                @for($m = 1; $m <= 12; $m++)
+                    <option value="{{ $m }}" {{ $m == $month ? 'selected' : '' }}>
+                        {{ \Carbon\Carbon::create()->month($m)->translatedFormat('F') }}
+                    </option>
+                @endfor
+            </select>
+
+            <!-- GODINA -->
+            <select id="gridYear" class="border p-1 rounded">
+                @for($y = now()->year; $y >= now()->year - 5; $y--)
+                    <option value="{{ $y }}" {{ $y == $year ? 'selected' : '' }}>
+                        {{ $y }}
+                    </option>
+                @endfor
+            </select>
+
+            <!-- DUGME -->
+            <button onclick="changeGridDate()" class="bg-blue-500 text-white px-3 py-1 rounded">
+                Prikaži
+            </button>
+
+        </div>
+
+        <h2 class="font-bold mb-3">📊 Mesečni pregled zaposlenih</h2>
+
+        <table class="min-w-full text-xs border">
+            <thead>
+                <tr>
+                    <td class="p-2 font-semibold bg-gray-100" hover:scale-110 transition>{{ auth()->user()->employee->first_name ?? '' }}</td>
+
+                    @for($d = 1; $d <= 31; $d++)
+                        <th class="p-1 border text-center w-8">{{ $d }}</th>
+                    @endfor
+                </tr>
+            </thead>
+
+            <tbody>
+
+            @foreach($employees as $emp)
+            <tr>
+
+                <!-- 👇 sticky ime -->
+                <td class="p-2 font-semibold bg-gray-100 whitespace-nowrap sticky left-0 z-10">
+                    {{ $emp->first_name }} {{ $emp->last_name }}
+                </td>
+
+                @for($d = 1; $d <= $daysInMonth; $d++)
+
+                    @php
+                        $entry = $emp->entries->firstWhere('day', $d);
+                        $date = \Carbon\Carbon::create($year, $month, $d);
+                        $isWeekend = $date->isWeekend();
+                        $isHoliday = in_array($date->format('Y-m-d'), $holidays);
+                    @endphp
+
+                    @if(!$entry)
+
+                        @php
+                            if ($isHoliday) {
+                                $color = 'bg-blue-200 text-blue-800 font-semibold'; // praznik
+                            } elseif ($isWeekend) {
+                                $color = 'bg-gray-200 text-gray-400'; // vikend
+                            } else {
+                                $color = 'bg-white text-gray-300'; // normalan dan
+                            }
+
+                            $label = '';
+                        @endphp
+
+                    @else
+
+                        @php
+                            $type = $entry->type ?? null;
+
+                            $color = match(true) {
+                                $type?->counts_as_work && $isWeekend => 'bg-green-700 text-white',
+                                $type?->counts_as_work => 'bg-green-500 text-white font-bold',   // rad
+                                
+                                $type?->affects_vacation => 'bg-amber-400 text-black font-bold', // godišnji
+                                $type && !$type->is_paid => 'bg-red-500 text-white font-bold',   // problem
+                                default => 'bg-gray-100 text-gray-400'
+                            };
+
+                            $label = $type->code ?? '';
+                        @endphp
+
+                    @endif
+
+                    <td 
+                        class="w-8 h-8 text-center align-middle border {{ $color }} cursor-pointer hover:opacity-80"
+                        onclick="openDay({{ $d }}, {{ $emp->id }}, this)"
+                        title="
+                            {{ $entry->type->name ?? 'Nema unosa' }}
+                            @if($entry && $entry->time_from && $entry->time_to)
+                            ({{ \Carbon\Carbon::parse($entry->time_from)->format('H:i') }} - {{ \Carbon\Carbon::parse($entry->time_to)->format('H:i') }})
+                            @endif
+                            "
+                    >
+                        {{ $label }}
+                    </td>
+
+                @endfor
+
+            </tr>
+            @endforeach
+
+            </tbody>
+        </table>
+
+    </div>
+</div>
+
+
 <div class="bg-gray-100 p-6">
 
 
@@ -240,9 +417,112 @@
 
     </div>
 
+    
+
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
+
+  
+
+    function changeGridDate() {
+    let m = document.getElementById('gridMonth').value;
+    let y = document.getElementById('gridYear').value;
+
+    let url = window.location.pathname + '?month=' + m + '&year=' + y;
+
+    window.location.href = url;
+}
+
+
+
+    window.openDay = function(day, employeeId, el) {
+
+        // 🔥 STOP da klik ne ide dalje
+        if (event) event.stopPropagation();
+
+        // ukloni stare selekcije (ĆELIJE)
+        document.querySelectorAll('.active-cell').forEach(td => {
+            td.classList.remove('active-cell');
+        });
+
+        // ukloni stare selekcije (REDOVA)
+        document.querySelectorAll('.active-row').forEach(tr => {
+            tr.classList.remove('active-row');
+        });
+
+        // nova selekcija
+        el.classList.add('active-cell');
+
+        let row = el.closest('tr');
+        if (row) {
+            row.classList.add('active-row');
+        }
+
+        let month = {{ $month }};
+        let year = {{ $year }};
+
+        let date = year + '-' +
+            String(month).padStart(2, '0') + '-' +
+            String(day).padStart(2, '0');
+
+        let types = @json($types);
+
+        // ukloni postojeći meni ako postoji
+        document.querySelectorAll('.cell-menu').forEach(e => e.remove());
+
+        let menu = document.createElement('div');
+        menu.className = "cell-menu absolute bg-white border shadow rounded text-xs z-50";
+
+        types.forEach(t => {
+            let item = document.createElement('div');
+            item.className = "px-2 py-1 hover:bg-gray-100 cursor-pointer";
+            item.innerText = t.code + " - " + t.name;
+
+            item.onclick = function() {
+                console.log("kliknut tip:", t.id);
+
+                fetch('/work-entry/update-or-create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({
+                        employee_id: employeeId,
+                        date: date,
+                        type_id: t.id
+                    })
+                })
+                .then(res => res.json())
+                .then(() => {
+                    updateCellUI(el, t);
+                    menu.remove();
+                });
+
+            };
+
+            menu.appendChild(item);
+        });
+
+        // pozicioniranje
+        let rect = el.getBoundingClientRect();
+
+        menu.style.minWidth = "120px";
+        menu.style.top = (rect.bottom + window.scrollY) + "px";
+        menu.style.left = (rect.left + window.scrollX) + "px";
+
+        document.body.appendChild(menu);
+        setTimeout(() => {
+            document.addEventListener('click', function handler() {
+                document.querySelectorAll('.cell-menu').forEach(e => e.remove());
+                document.removeEventListener('click', handler);
+            });
+        }, 0);
+    }
+
 
 function filterWork() {
 
@@ -252,6 +532,27 @@ function filterWork() {
     let url = window.location.pathname + '?year=' + year + '&month=' + month;
 
     window.location.href = url;
+}
+
+
+function updateCellUI(el, type) {
+
+    el.innerHTML = type.code;
+
+    el.className = "w-8 h-8 text-center align-middle border cursor-pointer";
+
+    if (type.counts_as_work) {
+        el.classList.add('bg-green-500','text-white','font-bold');
+    } 
+    else if (type.affects_vacation) {
+        el.classList.add('bg-amber-400','text-black','font-bold');
+    } 
+    else if (!type.is_paid) {
+        el.classList.add('bg-red-500','text-white','font-bold');
+    } 
+    else {
+        el.classList.add('bg-gray-100');
+    }
 }
 
 
