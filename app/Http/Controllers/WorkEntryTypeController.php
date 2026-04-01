@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\WorkEntryType;
+use App\Models\WorkEntry;
 
 class WorkEntryTypeController extends Controller
 {
@@ -19,21 +20,21 @@ class WorkEntryTypeController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'name' => 'required',
-            'code' => 'required|unique:work_entry_types,code',
-            'input_type' => 'required|in:time,range',
+            'employee_id' => 'required',
+            'date' => 'required|date',
+            'time_from' => 'required',
+            'time_to' => 'required',
+            'work_entry_type_id' => 'required',
         ]);
 
-        WorkEntryType::create([
-            'name' => $request->name,
-            'code' => strtoupper($request->code),
-            'input_type' => $request->input_type,
-            'is_paid' => $request->has('is_paid'),
-            'counts_as_work' => $request->has('counts_as_work'),
-            'affects_vacation' => $request->has('affects_vacation'),
-            'pay_multiplier' => $request->pay_multiplier ?? 1,
+        WorkEntry::create([
+            'employee_id' => $request->employee_id,
+            'date' => $request->date,
+            'time_from' => $request->time_from,
+            'time_to' => $request->time_to,
+            'work_entry_type_id' => $request->work_entry_type_id,
         ]);
 
-        return back();
+        return response()->json(['success' => true]);
     }
 }

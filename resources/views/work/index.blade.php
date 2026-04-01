@@ -4,12 +4,12 @@
 
 <style>
 .active-cell {
-    outline: 2px solid #3b82f6;
-    outline-offset: -2px;
+    background-color: rgba(59, 130, 246, 0.15);
 }
 
-.active-row td {
-    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.3);
+.active-row {
+    outline: 2px solid #3b82f6;
+    outline-offset: -2px;
 }
 
 .active-row td:first-child {
@@ -94,7 +94,7 @@
         <table class="min-w-full text-xs border">
             <thead>
                 <tr>
-                    <td class="p-2 font-semibold bg-gray-100" hover:scale-110 transition>{{ auth()->user()->employee->first_name ?? '' }}</td>
+                    <td class="p-2 font-semibold bg-gray-100 hover:scale-110 transition">{{ auth()->user()->employee->first_name ?? '' }}</td>
 
                     @for($d = 1; $d <= 31; $d++)
                         <th class="p-1 border text-center w-8">{{ $d }}</th>
@@ -156,9 +156,9 @@
 
                     <td 
                         class="w-8 h-8 text-center align-middle border {{ $color }} cursor-pointer hover:opacity-80"
-                        onclick="openDay({{ $d }}, {{ $emp->id }}, this)"
+                        onclick="openDay({{ $d }}, {{ $emp->id }}, this, event)"
                         title="
-                            {{ $entry->type->name ?? 'Nema unosa' }}
+                            {{ $entry?->type?->name ?? 'Nema unosa' }}
                             @if($entry && $entry->time_from && $entry->time_to)
                             ({{ \Carbon\Carbon::parse($entry->time_from)->format('H:i') }} - {{ \Carbon\Carbon::parse($entry->time_to)->format('H:i') }})
                             @endif
@@ -417,7 +417,38 @@
 
     </div>
 
-    
+    <div id="dayModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
+        <div class="bg-white w-[500px] rounded-xl shadow p-4">
+
+            <div class="flex justify-between mb-3">
+                <h2 id="modalTitle" class="font-bold">Unosi</h2>
+                <button onclick="closeModal()">✖</button>
+            </div>
+
+            <div id="modalDate" class="text-sm text-gray-500 mb-3"></div>
+
+            <div id="entriesList" class="space-y-2 mb-3 max-h-[200px] overflow-auto"></div>
+
+            <div class="grid grid-cols-3 gap-2 mb-3">
+                <input type="time" id="timeFrom" class="border p-2">
+                <input type="time" id="timeTo" class="border p-2">
+
+                <select id="entryType" class="border p-2">
+                    @foreach($types as $t)
+                        <option value="{{ $t->id }}">
+                            {{ $t->code }} - {{ $t->name }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
+            <button onclick="addEntry()" class="bg-green-600 text-white w-full p-2 rounded">
+                + Dodaj unos
+            </button>
+
+        </div>
+    </div>
+ 
 
 </div>
 
@@ -436,92 +467,112 @@
     window.location.href = url;
 }
 
+function closeModal() {
+    document.getElementById('dayModal').classList.add('hidden');
+}
 
 
-    window.openDay = function(day, employeeId, el) {
 
-        // 🔥 STOP da klik ne ide dalje
-        if (event) event.stopPropagation();
+    window.openDay = function(day, employeeId) {
 
-        // ukloni stare selekcije (ĆELIJE)
-        document.querySelectorAll('.active-cell').forEach(td => {
-            td.classList.remove('active-cell');
-        });
+        console.log("klik radi", day, employeeId);
 
-        // ukloni stare selekcije (REDOVA)
-        document.querySelectorAll('.active-row').forEach(tr => {
-            tr.classList.remove('active-row');
-        });
+        let date = `{{ $year }}-{{ str_pad($month,2,'0',STR_PAD_LEFT) }}-${String(day).padStart(2,'0')}`;
 
-        // nova selekcija
-        el.classList.add('active-cell');
+        modalState.employeeId = employeeId;
+        modalState.date = date;
 
-        let row = el.closest('tr');
-        if (row) {
-            row.classList.add('active-row');
-        }
+        document.getElementById('modalDate').innerText =
+            new Date(date).toLocaleDateString('sr-RS');
 
-        let month = {{ $month }};
-        let year = {{ $year }};
+        document.getElementById('dayModal').classList.remove('hidden');
+        document.getElementById('dayModal').classList.add('flex');
 
-        let date = year + '-' +
-            String(month).padStart(2, '0') + '-' +
-            String(day).padStart(2, '0');
-
-        let types = @json($types);
-
-        // ukloni postojeći meni ako postoji
-        document.querySelectorAll('.cell-menu').forEach(e => e.remove());
-
-        let menu = document.createElement('div');
-        menu.className = "cell-menu absolute bg-white border shadow rounded text-xs z-50";
-
-        types.forEach(t => {
-            let item = document.createElement('div');
-            item.className = "px-2 py-1 hover:bg-gray-100 cursor-pointer";
-            item.innerText = t.code + " - " + t.name;
-
-            item.onclick = function() {
-                console.log("kliknut tip:", t.id);
-
-                fetch('/work-entry/update-or-create', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                    },
-                    body: JSON.stringify({
-                        employee_id: employeeId,
-                        date: date,
-                        type_id: t.id
-                    })
-                })
-                .then(res => res.json())
-                .then(() => {
-                    updateCellUI(el, t);
-                    menu.remove();
-                });
-
-            };
-
-            menu.appendChild(item);
-        });
-
-        // pozicioniranje
-        let rect = el.getBoundingClientRect();
-
-        menu.style.minWidth = "120px";
-        menu.style.top = (rect.bottom + window.scrollY) + "px";
-        menu.style.left = (rect.left + window.scrollX) + "px";
-
-        document.body.appendChild(menu);
-        setTimeout(() => {
-            document.addEventListener('click', function handler() {
-                document.querySelectorAll('.cell-menu').forEach(e => e.remove());
-                document.removeEventListener('click', handler);
-            });
-        }, 0);
+        loadEntries();
     }
+
+let modalState = { employeeId:null, date:null, entries:[] };
+
+function loadEntries() {
+
+    fetch(`/work-entries/day?employee_id=${modalState.employeeId}&date=${modalState.date}`)
+        .then(res => {
+            if (!res.ok) throw new Error("Server error");
+            return res.json();
+        })
+        .then(data => {
+            modalState.entries = data;
+            renderEntries();
+        })
+        .catch(err => {
+            console.error("loadEntries error:", err);
+        });
+}
+
+function renderEntries() {
+
+    let c = document.getElementById('entriesList');
+    c.innerHTML = '';
+
+    if (!modalState.entries.length) {
+        c.innerHTML = '<div class="text-gray-400 text-sm">Nema unosa</div>';
+        return;
+    }
+
+    modalState.entries.forEach(e => {
+
+        let div = document.createElement('div');
+        div.className = "border p-2 text-sm flex justify-between";
+
+        div.innerHTML = `
+            <span>${e.time_from ?? '--'} - ${e.time_to ?? '--'} | ${e.type.name}</span>
+            <button onclick="deleteEntry(${e.id})" class="text-red-500">✖</button>
+        `;
+
+        c.appendChild(div);
+    });
+}
+
+function addEntry() {
+
+    let from = document.getElementById('timeFrom').value;
+    let to = document.getElementById('timeTo').value;
+    let typeId = document.getElementById('entryType').value;
+
+    if (!from || !to) {
+        alert("Unesi vreme");
+        return;
+    }
+
+    fetch('/work-entries', {
+        method: 'POST',
+        headers: {
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+        },
+        body: new URLSearchParams({
+            employee_id: modalState.employeeId,
+            date: modalState.date,
+            time_from: from,
+            time_to: to,
+            work_entry_type_id: typeId
+        })
+    })
+    .then(res => res.json())
+    .then(() => loadEntries())
+    .catch(err => {
+        console.error("ADD ERROR:", err);
+        alert("Greška pri upisu");
+    });
+}
+
+function deleteEntry(id) {
+    fetch(`/work-entries/${id}`, {
+        method:'DELETE',
+        headers:{
+            'X-CSRF-TOKEN':document.querySelector('meta[name="csrf-token"]').content
+        }
+    }).then(()=> loadEntries());
+}
 
 
 function filterWork() {
@@ -589,14 +640,14 @@ window.addEventListener('load', updateForm);
 
 document.addEventListener('DOMContentLoaded', function () {
 
-    const ctx = document.getElementById('workChart');
+    const ctx = document.getElementById('workChart')?.getContext('2d');
     if (!ctx) return;
 
-    const chartData = @json([
-        'regular' => $regularMinutes ?? 0,
-        'extra' => $extraMinutes ?? 0,
-        'unpaid' => $unpaidMinutes ?? 0
-    ]);
+            const chartData = {!! json_encode([
+            "regular" => $regularMinutes ?? 0,
+            "extra" => $extraMinutes ?? 0,
+            "unpaid" => $unpaidMinutes ?? 0
+        ]) !!};
 
     new Chart(ctx, {
         type: 'doughnut',
@@ -647,11 +698,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             }
         }
-            });
+    });
 
 });
 
 </script>
 
-</div>
+
 @endsection
