@@ -7,11 +7,16 @@ use App\Http\Controllers\WorkEntryController;
 
 
 
+use App\Http\Controllers\AttendanceController;
+
 
 
 Route::get('/employees', [EmployeeController::class, 'index'])->name('employees.index');
 Route::get('/employees/{id}/work', [\App\Http\Controllers\WorkController::class, 'index']);
 Route::get('/work-calendar', [WorkController::class, 'calendar']);
+Route::get('/test-attendance/{employeeId}', [AttendanceController::class, 'test']);
+
+
 Route::get('/employees/create', [EmployeeController::class, 'create']);
 Route::get('/work-types', [\App\Http\Controllers\WorkEntryTypeController::class, 'index']);
 Route::get('/work-entries/day', function (Illuminate\Http\Request $request) {
@@ -30,7 +35,7 @@ Route::post('/work-types', [\App\Http\Controllers\WorkEntryTypeController::class
 
 
 
-// SHOW
+
 Route::get('/employees/{id}', [EmployeeController::class, 'show'])->where('id', '[0-9]+');
 
 // HOME
